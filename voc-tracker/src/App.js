@@ -1,11 +1,7 @@
 import React from 'react';
 import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from '@azure/msal-react';
-import { PublicClientApplication } from '@azure/msal-browser';
-import { msalConfig, loginRequest } from './config/authConfig';
+import { loginRequest } from './config/authConfig';
 import VOCTracker from './components/VOCTracker';
-
-// Initialize MSAL instance
-const msalInstance = new PublicClientApplication(msalConfig);
 
 // Login button component
 function LoginButton() {
@@ -121,8 +117,8 @@ function AppContent() {
   );
 }
 
-// Root App component
-function App() {
+// Root App component - now receives msalInstance as prop
+function App({ msalInstance }) {
   return (
     <MsalProvider instance={msalInstance}>
       <AppContent />
