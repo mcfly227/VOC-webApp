@@ -4,10 +4,10 @@
 export const msalConfig = {
   auth: {
     // Your Azure AD App Registration Client ID
-    clientId: "YOUR_CLIENT_ID_HERE",
+    clientId: "a5f937cd-8751-4114-abcb-fe83db87c6d3",
     
     // Your Azure AD Tenant ID or 'common' for multi-tenant
-    authority: "https://login.microsoftonline.com/YOUR_TENANT_ID_HERE",
+    authority: "https://login.microsoftonline.com/83752677-9a6c-4b07-b357-837c86127907",
     
     // Redirect URI - must match what's configured in Azure AD
     redirectUri: window.location.origin,
@@ -33,7 +33,7 @@ export const loginRequest = {
 // SharePoint site configuration
 export const sharePointConfig = {
   // Your SharePoint site URL
-  siteUrl: "https://YOUR_TENANT.sharepoint.com/sites/YOUR_SITE",
+  siteUrl: "https://drindustriestech.sharepoint.com/sites/VOCTracking",
   
   // List names in SharePoint
   lists: {
