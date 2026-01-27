@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ComposedChart, Area } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // Product types mapping from PDS system: 1=Basecoat, 2=Hardener, 3=Solvent, 5=Clearcoat
 const PRODUCT_TYPES = { 1: 'Basecoat', 2: 'Hardener', 3: 'Solvent', 5: 'Clearcoat' };
@@ -10,7 +10,7 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 const LIMITS = {
   vocEU1: 40, vocEU2: 40, vocEU3: 10, vocFGCoating: 89.9,
   dibasicEster: 2.9, ethylbenzene: 2.9, cumene: 1.4,
-  aggregateHAPs: 8.9, individualHAP: 8.9
+  aggregateHAPs: 8.9
 };
 
 // Sample products from the PDS system
@@ -62,21 +62,18 @@ const generateSampleUsage = () => {
 };
 
 const COLORS = { 
-  primary: '#1e3a5f', secondary: '#2d5a87', accent: '#f97316', 
+  primary: '#1e3a5f', accent: '#f97316', 
   success: '#22c55e', warning: '#eab308', danger: '#ef4444', 
-  blue: '#3b82f6', purple: '#8b5cf6', cyan: '#06b6d4', pink: '#ec4899',
-  gray: '#64748b'
+  purple: '#8b5cf6', gray: '#64748b'
 };
 
 export default function VOCTracker() {
-  const [products, setProducts] = useState(SAMPLE_PRODUCTS);
+  const [products] = useState(SAMPLE_PRODUCTS);
   const [usageLog, setUsageLog] = useState(() => generateSampleUsage());
   const [activeTab, setActiveTab] = useState('aggregate-emissions');
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [newUsage, setNewUsage] = useState({ productId: '', emissionUnit: EMISSION_UNITS[0], gallons: '', date: new Date().toISOString().split('T')[0], partType: 'Automotive' });
-  const [showAddProduct, setShowAddProduct] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(null);
 
   // Calculate emissions by EU and time period (matching Aggregate Emissions Report structure)
   const aggregateEmissions = useMemo(() => {
@@ -243,7 +240,6 @@ export default function VOCTracker() {
   // Get current month data for display
   const currentMonthIdx = aggregateEmissions.findIndex(e => e.year === selectedYear && e.month === selectedMonth);
   const currentEmissions = currentMonthIdx >= 0 ? aggregateEmissions[currentMonthIdx] : null;
-  const currentMaterialUse = currentMonthIdx >= 0 ? aggregateMaterialUse[currentMonthIdx] : null;
 
   // Chart data for trend
   const trendData = aggregateEmissions.slice(0, 12).reverse().map(e => ({
