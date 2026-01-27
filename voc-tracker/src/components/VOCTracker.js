@@ -1,23 +1,31 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { useMsal } from '@azure/msal-react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { loginRequest } from '../config/authConfig';
-import sharePointService from '../services/sharePointService';
+import React, { useState, useMemo } from 'react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ComposedChart, Area } from 'recharts';
 
-// Fallback sample data for demo/offline mode
-const SAMPLE_PRODUCTS = [
-  { id: 'P1C21A', name: 'Low VOC Adhesion Promoter', number: 'P1C21A', supplier: 'Sherwin Williams', category: 'Basecoat', type: 'automotive', sg: 0.96, vocLbsGal: 4.59, hapV: 0.133, dibasicEster: 0, ethylbenzene: 0, cumene: 0, chemicals: [{ name: 'Naphthalene', cas: '91-20-3', pct: 0.009, isHap: true }, { name: 'Toluene', cas: '108-88-3', pct: 0.007, isHap: true }] },
-  { id: 'V66VM156', name: 'G56 Hardener', number: 'V66VM156', supplier: 'Sherwin Williams', category: 'Hardener', type: 'automotive', sg: 0.97, vocLbsGal: 3.80, hapV: 0.107, dibasicEster: 0, ethylbenzene: 0, cumene: 0, chemicals: [{ name: 'Methyl Isobutyl Ketone', cas: '108-10-1', pct: 0.013, isHap: true }] },
-  { id: '4800LE7', name: 'Jet Black 600R', number: '4800LE7', supplier: 'Redspot', category: 'Basecoat', type: 'automotive', sg: 1.065, vocLbsGal: 4.56, hapV: 0, dibasicEster: 0, ethylbenzene: 0, cumene: 0, chemicals: [{ name: 'Butyl Acetate', cas: '123-86-4', pct: 0.375, isHap: false }] },
-  { id: '85456', name: 'Acetone', number: '85456', supplier: 'Nexeo', category: 'Solvent', type: 'non-automotive', sg: 0.791, vocLbsGal: 0, hapV: 0, dibasicEster: 0, ethylbenzene: 0, cumene: 0, chemicals: [{ name: 'Acetone', cas: '67-64-1', pct: 0.975, isHap: false }] },
-  { id: 'G50CLEAR', name: 'Econet Z Clear G50', number: 'G50CLEAR', supplier: 'PPG', category: 'Clearcoat', type: 'automotive', sg: 1.02, vocLbsGal: 4.20, hapV: 0.065, dibasicEster: 0.002, ethylbenzene: 0.001, cumene: 0.0003, chemicals: [{ name: 'Xylene', cas: '1330-20-7', pct: 0.008, isHap: true }] },
-  { id: 'ARC29538C', name: 'Low Gloss Gray', number: 'ARC29538C', supplier: 'Redspot', category: 'Basecoat', type: 'non-automotive', sg: 1.108, vocLbsGal: 5.57, hapV: 2.351, dibasicEster: 0.01, ethylbenzene: 0.025, cumene: 0.005, chemicals: [{ name: 'Toluene', cas: '108-88-3', pct: 0.15, isHap: true }, { name: 'Ethyl Benzene', cas: '100-41-4', pct: 0.025, isHap: true }] },
-];
-
-const DEFAULT_EMISSION_UNITS = ['EU-Coating Line-01', 'EU-Coating Line-02', 'EU-Coating Line-03'];
-const CATEGORIES = ['Basecoat', 'Hardener', 'Clearcoat', 'Solvent'];
+// Product types mapping from PDS system: 1=Basecoat, 2=Hardener, 3=Solvent, 5=Clearcoat
+const PRODUCT_TYPES = { 1: 'Basecoat', 2: 'Hardener', 3: 'Solvent', 5: 'Clearcoat' };
+const EMISSION_UNITS = ['EU-CoatingLine-01', 'EU-CoatingLine-02', 'EU-CoatingLine-03'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+// Regulatory limits from PTI 183-15
+const LIMITS = {
+  vocEU1: 40, vocEU2: 40, vocEU3: 10, vocFGCoating: 89.9,
+  dibasicEster: 2.9, ethylbenzene: 2.9, cumene: 1.4,
+  aggregateHAPs: 8.9, individualHAP: 8.9
+};
+
+// Sample products from the PDS system
+const SAMPLE_PRODUCTS = [
+  { id: 'G56B1105', name: 'Rivian Black Mountain', number: 'G56B1105', supplier: 'Sherwin Williams', type: 1, sg: 1.05, vocLbsGal: 3.55, hapW: 0.02, hapV: 0.09, dibasicEster: 0, ethylbenzene: 0, cumene: 0 },
+  { id: '585W14J', name: 'Jet Black 600R', number: '585W14J', supplier: 'Redspot', type: 1, sg: 1.055, vocLbsGal: 0.085, hapW: 0, hapV: 0, dibasicEster: 0, ethylbenzene: 0, cumene: 0 },
+  { id: '4800LE7', name: 'Jet Black 600R', number: '4800LE7', supplier: 'Redspot', type: 1, sg: 1.065, vocLbsGal: 4.56, hapW: 0, hapV: 0, dibasicEster: 0, ethylbenzene: 0, cumene: 0 },
+  { id: 'SPU78534VA', name: 'Econet Z Clear G50S', number: 'SPU78534VA', supplier: 'PPG', type: 5, sg: 0.982, vocLbsGal: 4.95, hapW: 0.07, hapV: 0.24, dibasicEster: 0.001, ethylbenzene: 0.0005, cumene: 0.0002 },
+  { id: 'V66VM156', name: 'G56 Hardener', number: 'V66VM156', supplier: 'Sherwin Williams', type: 2, sg: 0.97, vocLbsGal: 3.8, hapW: 0.02, hapV: 0.107, dibasicEster: 0, ethylbenzene: 0, cumene: 0 },
+  { id: '85456', name: 'Acetone', number: '85456', supplier: 'Nexeo', type: 3, sg: 0.791, vocLbsGal: 0, hapW: 0, hapV: 0, dibasicEster: 0, ethylbenzene: 0, cumene: 0 },
+  { id: 'P1C21A', name: 'Low VOC Adhesion Promoter', number: 'P1C21A', supplier: 'Sherwin Williams', type: 1, sg: 0.96, vocLbsGal: 4.59, hapW: 0, hapV: 0.133, dibasicEster: 0, ethylbenzene: 0, cumene: 0 },
+  { id: 'SL10', name: 'Waterborne Urethane Hardener', number: 'SL10', supplier: 'Redspot', type: 2, sg: 1.016, vocLbsGal: 0.536, hapW: 0.004, hapV: 0.019, dibasicEster: 0, ethylbenzene: 0, cumene: 0 },
+];
+
+// Generate sample usage data
 const generateSampleUsage = () => {
   const usage = [];
   const now = new Date();
@@ -25,25 +33,27 @@ const generateSampleUsage = () => {
     const date = new Date(now);
     date.setDate(date.getDate() - i);
     if (date.getDay() !== 0 && date.getDay() !== 6) {
-      const numEntries = Math.floor(Math.random() * 8) + 3;
+      const numEntries = Math.floor(Math.random() * 6) + 2;
       for (let j = 0; j < numEntries; j++) {
         const product = SAMPLE_PRODUCTS[Math.floor(Math.random() * SAMPLE_PRODUCTS.length)];
-        const eu = DEFAULT_EMISSION_UNITS[Math.floor(Math.random() * DEFAULT_EMISSION_UNITS.length)];
-        const gallons = Math.round((Math.random() * 15 + 0.5) * 100) / 100;
+        const eu = EMISSION_UNITS[Math.floor(Math.random() * EMISSION_UNITS.length)];
+        const gallons = Math.round((Math.random() * 50 + 5) * 100) / 100;
+        const partType = Math.random() > 0.3 ? 'Automotive' : 'Non-Automotive Specialty';
         usage.push({
           id: `${date.toISOString()}-${j}`,
           date: date.toISOString().split('T')[0],
           productId: product.id,
           productName: product.name,
-          category: product.category,
-          type: product.type,
+          productNumber: product.number,
+          productType: product.type,
           emissionUnit: eu,
+          partType,
           gallons,
           vocLbs: gallons * product.vocLbsGal,
           hapLbs: gallons * product.hapV * product.sg * 8.34,
-          cumene: gallons * product.cumene * product.sg * 8.34,
-          dibasicEster: gallons * product.dibasicEster * product.sg * 8.34,
-          ethylbenzene: gallons * product.ethylbenzene * product.sg * 8.34
+          dibasicEsterLbs: gallons * product.dibasicEster * product.sg * 8.34,
+          ethylbenzeneLbs: gallons * product.ethylbenzene * product.sg * 8.34,
+          cumeneLbs: gallons * product.cumene * product.sg * 8.34
         });
       }
     }
@@ -51,509 +61,439 @@ const generateSampleUsage = () => {
   return usage;
 };
 
-const COLORS = { primary: '#0f172a', secondary: '#1e293b', accent: '#f97316', success: '#22c55e', warning: '#eab308', danger: '#ef4444', blue: '#3b82f6', purple: '#8b5cf6', cyan: '#06b6d4', pink: '#ec4899' };
-const PIE_COLORS = [COLORS.accent, COLORS.blue, COLORS.success, COLORS.purple, COLORS.cyan, COLORS.pink];
+const COLORS = { 
+  primary: '#1e3a5f', secondary: '#2d5a87', accent: '#f97316', 
+  success: '#22c55e', warning: '#eab308', danger: '#ef4444', 
+  blue: '#3b82f6', purple: '#8b5cf6', cyan: '#06b6d4', pink: '#ec4899',
+  gray: '#64748b'
+};
 
 export default function VOCTracker() {
-  const { instance, accounts } = useMsal();
-  const [dataSource, setDataSource] = useState('demo');
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-  
   const [products, setProducts] = useState(SAMPLE_PRODUCTS);
   const [usageLog, setUsageLog] = useState(() => generateSampleUsage());
-  const [emissionUnits, setEmissionUnits] = useState(DEFAULT_EMISSION_UNITS);
-  
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('aggregate-emissions');
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
-  const [newUsage, setNewUsage] = useState({ productId: '', emissionUnit: DEFAULT_EMISSION_UNITS[0], gallons: '', date: new Date().toISOString().split('T')[0] });
-  const [newProduct, setNewProduct] = useState({ id: '', name: '', number: '', supplier: '', category: 'Basecoat', type: 'automotive', sg: '', vocLbsGal: '', hapV: '', dibasicEster: '', ethylbenzene: '', cumene: '' });
-  const [showProductModal, setShowProductModal] = useState(false);
+  const [newUsage, setNewUsage] = useState({ productId: '', emissionUnit: EMISSION_UNITS[0], gallons: '', date: new Date().toISOString().split('T')[0], partType: 'Automotive' });
+  const [showAddProduct, setShowAddProduct] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
 
-  const getAccessToken = useCallback(async () => {
-    if (accounts.length === 0) return null;
-    try {
-      const response = await instance.acquireTokenSilent({
-        ...loginRequest,
-        account: accounts[0],
-      });
-      return response.accessToken;
-    } catch (error) {
-      try {
-        const response = await instance.acquireTokenPopup(loginRequest);
-        return response.accessToken;
-      } catch (popupError) {
-        console.error('Token acquisition failed:', popupError);
-        return null;
-      }
-    }
-  }, [instance, accounts]);
-
-  const loadSharePointData = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const token = await getAccessToken();
-      if (!token) throw new Error('Unable to acquire access token');
-      sharePointService.setAccessToken(token);
-      const [spProducts, spUsageLog, spEmissionUnits] = await Promise.all([
-        sharePointService.getProducts(),
-        sharePointService.getRollingYearData(),
-        sharePointService.getEmissionUnits().catch(() => DEFAULT_EMISSION_UNITS),
-      ]);
-      setProducts(spProducts.length > 0 ? spProducts : SAMPLE_PRODUCTS);
-      setUsageLog(spUsageLog.length > 0 ? spUsageLog : generateSampleUsage());
-      setEmissionUnits(spEmissionUnits.length > 0 ? spEmissionUnits : DEFAULT_EMISSION_UNITS);
-      setDataSource('sharepoint');
-    } catch (err) {
-      console.error('SharePoint load error:', err);
-      setError(`Failed to load from SharePoint: ${err.message}. Using demo data.`);
-      setDataSource('demo');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [getAccessToken]);
-
-  const handleLogout = () => {
-    instance.logoutPopup();
-  };
-
-  const rollingYearData = useMemo(() => {
+  // Calculate emissions by EU and time period (matching Aggregate Emissions Report structure)
+  const aggregateEmissions = useMemo(() => {
+    const results = [];
     const now = new Date();
-    const oneYearAgo = new Date(now);
-    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-    const filtered = usageLog.filter(u => new Date(u.date) >= oneYearAgo);
-    return {
-      gallons: filtered.reduce((s, u) => s + u.gallons, 0),
-      vocTons: filtered.reduce((s, u) => s + u.vocLbs, 0) / 2000,
-      hapTons: filtered.reduce((s, u) => s + u.hapLbs, 0) / 2000,
-      cumeneTons: filtered.reduce((s, u) => s + u.cumene, 0) / 2000,
-      dibasicEsterTons: filtered.reduce((s, u) => s + u.dibasicEster, 0) / 2000,
-      ethylbenzeneTons: filtered.reduce((s, u) => s + u.ethylbenzene, 0) / 2000
-    };
-  }, [usageLog]);
-
-  const monthlySummary = useMemo(() => {
-    const startDate = new Date(selectedYear, selectedMonth, 1);
-    const endDate = new Date(selectedYear, selectedMonth + 1, 0);
-    const filtered = usageLog.filter(u => { const d = new Date(u.date); return d >= startDate && d <= endDate; });
-    const byEU = {};
-    emissionUnits.forEach(eu => {
-      const euData = filtered.filter(u => u.emissionUnit === eu);
-      byEU[eu] = { 
-        gallons: euData.reduce((s, u) => s + u.gallons, 0), 
-        vocLbs: euData.reduce((s, u) => s + u.vocLbs, 0), 
-        hapLbs: euData.reduce((s, u) => s + u.hapLbs, 0), 
-        cumene: euData.reduce((s, u) => s + u.cumene, 0), 
-        dibasicEster: euData.reduce((s, u) => s + u.dibasicEster, 0), 
-        ethylbenzene: euData.reduce((s, u) => s + u.ethylbenzene, 0) 
-      };
-    });
-    return {
-      total: { 
-        gallons: filtered.reduce((s, u) => s + u.gallons, 0), 
-        vocTons: filtered.reduce((s, u) => s + u.vocLbs, 0) / 2000, 
-        hapTons: filtered.reduce((s, u) => s + u.hapLbs, 0) / 2000, 
-        cumeneTons: filtered.reduce((s, u) => s + u.cumene, 0) / 2000, 
-        dibasicEsterTons: filtered.reduce((s, u) => s + u.dibasicEster, 0) / 2000, 
-        ethylbenzeneTons: filtered.reduce((s, u) => s + u.ethylbenzene, 0) / 2000 
-      },
-      byEU
-    };
-  }, [usageLog, selectedMonth, selectedYear, emissionUnits]);
-
-  const dailyUsage = useMemo(() => {
-    const startDate = new Date(selectedYear, selectedMonth, 1);
-    const endDate = new Date(selectedYear, selectedMonth + 1, 0);
-    const filtered = usageLog.filter(u => { const d = new Date(u.date); return d >= startDate && d <= endDate; });
-    const byDay = {};
-    filtered.forEach(u => {
-      if (!byDay[u.date]) byDay[u.date] = { date: u.date, Basecoat: { automotive: 0, nonAutomotive: 0 }, Hardener: { automotive: 0, nonAutomotive: 0 }, Clearcoat: { automotive: 0, nonAutomotive: 0 }, Solvent: { automotive: 0, nonAutomotive: 0 } };
-      const typeKey = u.type === 'automotive' ? 'automotive' : 'nonAutomotive';
-      if (byDay[u.date][u.category]) byDay[u.date][u.category][typeKey] += u.gallons;
-    });
-    return Object.values(byDay).sort((a, b) => a.date.localeCompare(b.date));
-  }, [usageLog, selectedMonth, selectedYear]);
-
-  const materialContent = useMemo(() => products.map(p => ({ 
-    id: p.id, 
-    name: p.name, 
-    category: p.category, 
-    vocLbsGal: p.vocLbsGal, 
-    hapLbsGal: p.hapV * p.sg * 8.34, 
-    aggregateHap: p.hapV * 100, 
-    cumene: p.cumene * p.sg * 8.34, 
-    dibasicEster: p.dibasicEster * p.sg * 8.34, 
-    ethylbenzene: p.ethylbenzene * p.sg * 8.34 
-  })), [products]);
-
-  const monthlyTrendData = useMemo(() => {
-    const data = [];
-    for (let i = 11; i >= 0; i--) {
-      const date = new Date();
-      date.setMonth(date.getMonth() - i);
-      const month = date.getMonth(), year = date.getFullYear();
-      const startDate = new Date(year, month, 1), endDate = new Date(year, month + 1, 0);
-      const filtered = usageLog.filter(u => { const d = new Date(u.date); return d >= startDate && d <= endDate; });
-      data.push({ 
-        month: `${MONTHS[month]} ${year}`, 
-        gallons: Math.round(filtered.reduce((s, u) => s + u.gallons, 0)), 
-        vocTons: parseFloat((filtered.reduce((s, u) => s + u.vocLbs, 0) / 2000).toFixed(3)), 
-        hapTons: parseFloat((filtered.reduce((s, u) => s + u.hapLbs, 0) / 2000).toFixed(4)) 
+    
+    for (let monthOffset = 0; monthOffset < 60; monthOffset++) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1);
+      const year = targetDate.getFullYear();
+      const month = targetDate.getMonth();
+      
+      const startDate = new Date(year, month, 1);
+      const endDate = new Date(year, month + 1, 0);
+      
+      // Filter monthly data
+      const monthlyData = usageLog.filter(u => {
+        const d = new Date(u.date);
+        return d >= startDate && d <= endDate;
+      });
+      
+      // Calculate rolling 12-month data
+      const rolling12Start = new Date(year, month - 11, 1);
+      const rolling12Data = usageLog.filter(u => {
+        const d = new Date(u.date);
+        return d >= rolling12Start && d <= endDate;
+      });
+      
+      // By EU
+      const byEU = {};
+      EMISSION_UNITS.forEach(eu => {
+        const euMonthly = monthlyData.filter(u => u.emissionUnit === eu);
+        const euRolling = rolling12Data.filter(u => u.emissionUnit === eu);
+        byEU[eu] = {
+          vocMonthly: euMonthly.reduce((s, u) => s + u.vocLbs, 0) / 2000,
+          vocRolling: euRolling.reduce((s, u) => s + u.vocLbs, 0) / 2000
+        };
+      });
+      
+      // FG-Coating totals
+      const vocMonthlyTotal = monthlyData.reduce((s, u) => s + u.vocLbs, 0) / 2000;
+      const vocRollingTotal = rolling12Data.reduce((s, u) => s + u.vocLbs, 0) / 2000;
+      
+      // CAS Specific (in lbs for Dibasic Ester and Ethylbenzene, tons for Cumene)
+      const dibasicEsterMonthly = monthlyData.reduce((s, u) => s + u.dibasicEsterLbs, 0);
+      const dibasicEsterRolling = rolling12Data.reduce((s, u) => s + u.dibasicEsterLbs, 0);
+      const ethylbenzeneMonthly = monthlyData.reduce((s, u) => s + u.ethylbenzeneLbs, 0);
+      const ethylbenzeneRolling = rolling12Data.reduce((s, u) => s + u.ethylbenzeneLbs, 0);
+      const cumeneMonthly = monthlyData.reduce((s, u) => s + u.cumeneLbs, 0) / 2000;
+      const cumeneRolling = rolling12Data.reduce((s, u) => s + u.cumeneLbs, 0) / 2000;
+      
+      // HAPs
+      const hapMonthly = monthlyData.reduce((s, u) => s + u.hapLbs, 0) / 2000;
+      const hapRolling = rolling12Data.reduce((s, u) => s + u.hapLbs, 0) / 2000;
+      
+      results.push({
+        year, month, monthName: MONTHS[month],
+        byEU,
+        vocMonthlyTotal, vocRollingTotal,
+        dibasicEsterMonthly, dibasicEsterRolling,
+        ethylbenzeneMonthly, ethylbenzeneRolling,
+        cumeneMonthly, cumeneRolling,
+        hapMonthly, hapRolling
       });
     }
-    return data;
+    return results;
   }, [usageLog]);
 
-  const categoryBreakdown = useMemo(() => {
-    const startDate = new Date(selectedYear, selectedMonth, 1), endDate = new Date(selectedYear, selectedMonth + 1, 0);
-    const filtered = usageLog.filter(u => { const d = new Date(u.date); return d >= startDate && d <= endDate; });
-    return CATEGORIES.map(cat => ({ name: cat, gallons: filtered.filter(u => u.category === cat).reduce((s, u) => s + u.gallons, 0) }));
+  // Aggregate Material Use (in gallons)
+  const aggregateMaterialUse = useMemo(() => {
+    const results = [];
+    const now = new Date();
+    
+    for (let monthOffset = 0; monthOffset < 60; monthOffset++) {
+      const targetDate = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1);
+      const year = targetDate.getFullYear();
+      const month = targetDate.getMonth();
+      
+      const startDate = new Date(year, month, 1);
+      const endDate = new Date(year, month + 1, 0);
+      
+      const monthlyData = usageLog.filter(u => {
+        const d = new Date(u.date);
+        return d >= startDate && d <= endDate;
+      });
+      
+      const byEU = {};
+      EMISSION_UNITS.forEach(eu => {
+        byEU[eu] = monthlyData.filter(u => u.emissionUnit === eu).reduce((s, u) => s + u.gallons, 0);
+      });
+      
+      const total = monthlyData.reduce((s, u) => s + u.gallons, 0);
+      
+      results.push({ year, month, monthName: MONTHS[month], byEU, total });
+    }
+    return results;
+  }, [usageLog]);
+
+  // Daily usage by EU (matching Daily Use sheets)
+  const dailyUseByEU = useMemo(() => {
+    const startDate = new Date(selectedYear, selectedMonth, 1);
+    const endDate = new Date(selectedYear, selectedMonth + 1, 0);
+    
+    const filtered = usageLog.filter(u => {
+      const d = new Date(u.date);
+      return d >= startDate && d <= endDate;
+    });
+    
+    const byEU = {};
+    EMISSION_UNITS.forEach(eu => {
+      byEU[eu] = filtered
+        .filter(u => u.emissionUnit === eu)
+        .map(u => ({
+          date: u.date,
+          coatingType: PRODUCT_TYPES[u.productType] || 'Unknown',
+          prodNumber: u.productNumber,
+          partType: u.partType,
+          materialUse: u.gallons
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date));
+    });
+    return byEU;
   }, [usageLog, selectedMonth, selectedYear]);
 
-  const handleAddUsage = async () => {
+  // Material Content Report
+  const materialContent = useMemo(() => {
+    return products.map(p => ({
+      productNumber: p.number,
+      hapContent: p.hapV * p.sg * 8.34,
+      vocContent: p.vocLbsGal,
+      cumeneContent: p.cumene * p.sg * 8.34,
+      dimethylAdipate: p.dibasicEster * p.sg * 8.34 * 0.4,
+      dimethylGlutarate: p.dibasicEster * p.sg * 8.34 * 0.4,
+      dimethylSuccinate: p.dibasicEster * p.sg * 8.34 * 0.2,
+      ethylbenzeneContent: p.ethylbenzene * p.sg * 8.34
+    }));
+  }, [products]);
+
+  // Handle add usage
+  const handleAddUsage = () => {
     if (!newUsage.productId || !newUsage.gallons) return;
     const product = products.find(p => p.id === newUsage.productId);
     if (!product) return;
     const gallons = parseFloat(newUsage.gallons);
-    
-    if (dataSource === 'sharepoint') {
-      setIsLoading(true);
-      try {
-        const token = await getAccessToken();
-        sharePointService.setAccessToken(token);
-        const entry = await sharePointService.addUsageEntry(newUsage, product);
-        setUsageLog([...usageLog, entry]);
-      } catch (err) {
-        setError(`Failed to save: ${err.message}`);
-      } finally {
-        setIsLoading(false);
-      }
-    } else {
-      const entry = {
-        id: Date.now().toString(),
-        date: newUsage.date,
-        productId: product.id,
-        productName: product.name,
-        category: product.category,
-        type: product.type,
-        emissionUnit: newUsage.emissionUnit,
-        gallons,
-        vocLbs: gallons * product.vocLbsGal,
-        hapLbs: gallons * product.hapV * product.sg * 8.34,
-        cumene: gallons * product.cumene * product.sg * 8.34,
-        dibasicEster: gallons * product.dibasicEster * product.sg * 8.34,
-        ethylbenzene: gallons * product.ethylbenzene * product.sg * 8.34
-      };
-      setUsageLog([...usageLog, entry]);
-    }
+    const entry = {
+      id: Date.now().toString(),
+      date: newUsage.date,
+      productId: product.id,
+      productName: product.name,
+      productNumber: product.number,
+      productType: product.type,
+      emissionUnit: newUsage.emissionUnit,
+      partType: newUsage.partType,
+      gallons,
+      vocLbs: gallons * product.vocLbsGal,
+      hapLbs: gallons * product.hapV * product.sg * 8.34,
+      dibasicEsterLbs: gallons * product.dibasicEster * product.sg * 8.34,
+      ethylbenzeneLbs: gallons * product.ethylbenzene * product.sg * 8.34,
+      cumeneLbs: gallons * product.cumene * product.sg * 8.34
+    };
+    setUsageLog([...usageLog, entry]);
     setNewUsage({ ...newUsage, productId: '', gallons: '' });
   };
 
-  const handleAddProduct = async () => {
-    if (!newProduct.id || !newProduct.name) return;
-    const product = {
-      ...newProduct,
-      sg: parseFloat(newProduct.sg) || 1,
-      vocLbsGal: parseFloat(newProduct.vocLbsGal) || 0,
-      hapV: parseFloat(newProduct.hapV) / 100 || 0,
-      dibasicEster: parseFloat(newProduct.dibasicEster) / 100 || 0,
-      ethylbenzene: parseFloat(newProduct.ethylbenzene) / 100 || 0,
-      cumene: parseFloat(newProduct.cumene) / 100 || 0,
-      chemicals: []
-    };
-    
-    if (dataSource === 'sharepoint') {
-      setIsLoading(true);
-      try {
-        const token = await getAccessToken();
-        sharePointService.setAccessToken(token);
-        await sharePointService.addProduct({
-          ...newProduct,
-          hapV: newProduct.hapV,
-          dibasicEster: newProduct.dibasicEster,
-          ethylbenzene: newProduct.ethylbenzene,
-          cumene: newProduct.cumene,
-        });
-        setProducts([...products, product]);
-      } catch (err) {
-        setError(`Failed to save product: ${err.message}`);
-      } finally {
-        setIsLoading(false);
-      }
-    } else {
-      setProducts([...products, product]);
-    }
-    setNewProduct({ id: '', name: '', number: '', supplier: '', category: 'Basecoat', type: 'automotive', sg: '', vocLbsGal: '', hapV: '', dibasicEster: '', ethylbenzene: '', cumene: '' });
-    setShowProductModal(false);
+  // Get current month data for display
+  const currentMonthIdx = aggregateEmissions.findIndex(e => e.year === selectedYear && e.month === selectedMonth);
+  const currentEmissions = currentMonthIdx >= 0 ? aggregateEmissions[currentMonthIdx] : null;
+  const currentMaterialUse = currentMonthIdx >= 0 ? aggregateMaterialUse[currentMonthIdx] : null;
+
+  // Chart data for trend
+  const trendData = aggregateEmissions.slice(0, 12).reverse().map(e => ({
+    month: `${e.monthName} ${e.year}`,
+    vocMonthly: e.vocMonthlyTotal,
+    vocRolling: e.vocRollingTotal,
+    hapMonthly: e.hapMonthly,
+    hapRolling: e.hapRolling
+  }));
+
+  const LimitIndicator = ({ value, limit, label }) => {
+    const pct = (value / limit) * 100;
+    const color = pct > 90 ? COLORS.danger : pct > 75 ? COLORS.warning : COLORS.success;
+    return (
+      <div style={{ marginBottom: '8px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+          <span>{label}</span>
+          <span style={{ color }}>{value.toFixed(4)} / {limit} TPY ({pct.toFixed(1)}%)</span>
+        </div>
+        <div style={{ background: '#e2e8f0', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
+          <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: color, transition: 'width 0.3s' }} />
+        </div>
+      </div>
+    );
   };
 
-  const getCategoryColor = (cat) => cat === 'Basecoat' ? COLORS.accent : cat === 'Hardener' ? COLORS.blue : cat === 'Clearcoat' ? COLORS.success : COLORS.purple;
-
-  const MetricCard = ({ title, value, unit, color, subtext }) => (
-    <div style={{ background: `linear-gradient(135deg, ${color}15 0%, ${color}05 100%)`, borderLeft: `4px solid ${color}`, borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
-      <div style={{ fontSize: '12px', fontWeight: '600', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{title}</div>
-      <div style={{ fontSize: '28px', fontWeight: '700', color: COLORS.primary, marginTop: '8px' }}>
-        {typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 4 }) : value}
-        <span style={{ fontSize: '14px', fontWeight: '400', color: '#64748b', marginLeft: '4px' }}>{unit}</span>
-      </div>
-      {subtext && <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>{subtext}</div>}
-    </div>
-  );
-
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+    <div style={{ minHeight: '100vh', background: '#f1f5f9', fontFamily: "'Inter', -apple-system, sans-serif" }}>
       {/* Header */}
-      <header style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)', color: 'white', padding: '20px 32px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: '1400px', margin: '0 auto' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: '700', margin: 0, letterSpacing: '-0.025em' }}>
-              <span style={{ color: COLORS.accent }}>VOC</span> Emissions Tracker
-            </h1>
-            <p style={{ fontSize: '13px', color: '#94a3b8', margin: '4px 0 0' }}>
-              Automotive Coatings Environmental Management System
-              <span style={{ marginLeft: '12px', padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '600', background: dataSource === 'sharepoint' ? '#22c55e30' : '#f9731630', color: dataSource === 'sharepoint' ? '#22c55e' : '#f97316' }}>
-                {dataSource === 'sharepoint' ? '● SharePoint Connected' : '● Demo Mode'}
-              </span>
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {['dashboard', 'usage', 'products', 'reports'].map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)} style={{ padding: '10px 20px', borderRadius: '8px', border: 'none', background: activeTab === tab ? COLORS.accent : 'transparent', color: activeTab === tab ? 'white' : '#94a3b8', fontWeight: '600', fontSize: '13px', cursor: 'pointer', textTransform: 'capitalize' }}>{tab}</button>
-            ))}
-            <div style={{ width: '1px', height: '24px', background: '#475569', margin: '0 8px' }} />
-            {dataSource === 'demo' && (
-              <button onClick={loadSharePointData} disabled={isLoading} style={{ padding: '10px 16px', borderRadius: '8px', border: '1px solid #475569', background: 'transparent', color: '#94a3b8', fontWeight: '600', fontSize: '12px', cursor: 'pointer' }}>
-                {isLoading ? 'Connecting...' : 'Connect SharePoint'}
-              </button>
-            )}
-            <button onClick={handleLogout} style={{ padding: '10px 16px', borderRadius: '8px', border: '1px solid #475569', background: 'transparent', color: '#94a3b8', fontWeight: '600', fontSize: '12px', cursor: 'pointer' }}>
-              Sign Out
-            </button>
+      <header style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%)', color: 'white', padding: '16px 24px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)' }}>
+        <div style={{ maxWidth: '1600px', margin: '0 auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h1 style={{ fontSize: '22px', fontWeight: '700', margin: 0 }}>
+                <span style={{ color: COLORS.accent }}>PTI 183-15</span> Aggregate Emissions Tracker
+              </h1>
+              <p style={{ fontSize: '13px', color: '#94a3b8', margin: '4px 0 0' }}>EGLE Environmental Compliance Management System</p>
+            </div>
+            <div style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '8px', padding: '4px' }}>
+              {[
+                { id: 'aggregate-emissions', label: '1. Aggregate Emissions' },
+                { id: 'aggregate-material', label: '2. Material Use' },
+                { id: 'daily-use', label: '3-6. Daily Use by EU' },
+                { id: 'material-content', label: '7. Material Content' },
+                { id: 'log-usage', label: 'Log Usage' }
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                  style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', background: activeTab === tab.id ? 'white' : 'transparent', color: activeTab === tab.id ? COLORS.primary : 'rgba(255,255,255,0.8)', fontWeight: '500', fontSize: '12px', cursor: 'pointer' }}>
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Error Banner */}
-      {error && (
-        <div style={{ maxWidth: '1400px', margin: '16px auto 0', padding: '0 32px' }}>
-          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '12px 16px', color: '#dc2626', fontSize: '13px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            {error}
-            <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', color: '#dc2626', cursor: 'pointer', fontSize: '18px' }}>×</button>
-          </div>
+      {/* Date Selector */}
+      <div style={{ background: 'white', borderBottom: '1px solid #e2e8f0', padding: '12px 24px' }}>
+        <div style={{ maxWidth: '1600px', margin: '0 auto', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <span style={{ fontSize: '13px', fontWeight: '600', color: COLORS.gray }}>Report Period:</span>
+          <select value={selectedMonth} onChange={e => setSelectedMonth(parseInt(e.target.value))} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
+            {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
+          </select>
+          <select value={selectedYear} onChange={e => setSelectedYear(parseInt(e.target.value))} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
+            {[2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
         </div>
-      )}
+      </div>
 
-      {/* Loading Banner */}
-      {isLoading && (
-        <div style={{ maxWidth: '1400px', margin: '16px auto 0', padding: '0 32px' }}>
-          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '12px 16px', color: '#2563eb', fontSize: '13px' }}>
-            Loading data from SharePoint...
-          </div>
-        </div>
-      )}
-
-      {/* Main Content */}
-      <main style={{ maxWidth: '1400px', margin: '0 auto', padding: '24px 32px' }}>
-        
-        {/* DASHBOARD TAB */}
-        {activeTab === 'dashboard' && (
+      <main style={{ maxWidth: '1600px', margin: '0 auto', padding: '20px 24px' }}>
+        {/* Tab 1: Aggregate Emissions Report */}
+        {activeTab === 'aggregate-emissions' && currentEmissions && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: '700', color: COLORS.primary, margin: 0 }}>Rolling 12-Month Summary</h2>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                <select value={selectedMonth} onChange={e => setSelectedMonth(parseInt(e.target.value))} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
-                  {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
-                </select>
-                <select value={selectedYear} onChange={e => setSelectedYear(parseInt(e.target.value))} style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
-                  {[2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
+            <h2 style={{ fontSize: '18px', fontWeight: '700', color: COLORS.primary, margin: '0 0 20px' }}>1. Aggregate Emissions Report</h2>
+            
+            {/* Regulatory Limits Status */}
+            <div style={{ background: 'white', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>Rolling 12-Month vs. PTI Limits</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px' }}>
+                <div>
+                  <LimitIndicator value={currentEmissions.byEU['EU-CoatingLine-01']?.vocRolling || 0} limit={LIMITS.vocEU1} label="EU-CoatingLine-01 VOC" />
+                  <LimitIndicator value={currentEmissions.byEU['EU-CoatingLine-02']?.vocRolling || 0} limit={LIMITS.vocEU2} label="EU-CoatingLine-02 VOC" />
+                </div>
+                <div>
+                  <LimitIndicator value={currentEmissions.byEU['EU-CoatingLine-03']?.vocRolling || 0} limit={LIMITS.vocEU3} label="EU-CoatingLine-03 VOC" />
+                  <LimitIndicator value={currentEmissions.vocRollingTotal} limit={LIMITS.vocFGCoating} label="FG-Coating Total VOC" />
+                </div>
+                <div>
+                  <LimitIndicator value={currentEmissions.dibasicEsterRolling / 2000} limit={LIMITS.dibasicEster} label="Dibasic Ester (FG-Coating)" />
+                  <LimitIndicator value={currentEmissions.ethylbenzeneRolling / 2000} limit={LIMITS.ethylbenzene} label="Ethylbenzene (FG-Coating)" />
+                </div>
+                <div>
+                  <LimitIndicator value={currentEmissions.cumeneRolling} limit={LIMITS.cumene} label="Cumene (FG-Facility)" />
+                  <LimitIndicator value={currentEmissions.hapRolling} limit={LIMITS.aggregateHAPs} label="Aggregate HAPs (FG-Facility)" />
+                </div>
               </div>
             </div>
 
-            {/* Rolling 12-Month Metrics */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '16px', marginBottom: '24px' }}>
-              <MetricCard title="Total Usage" value={rollingYearData.gallons} unit="gal" color={COLORS.blue} subtext="Rolling 12 months" />
-              <MetricCard title="VOC Emissions" value={rollingYearData.vocTons} unit="tons" color={COLORS.accent} subtext="Rolling 12 months" />
-              <MetricCard title="Aggregate HAPs" value={rollingYearData.hapTons} unit="tons" color={COLORS.purple} subtext="Rolling 12 months" />
-              <MetricCard title="Cumene" value={rollingYearData.cumeneTons} unit="tons" color={COLORS.cyan} subtext="CAS 98-82-8" />
-              <MetricCard title="Dibasic Ester" value={rollingYearData.dibasicEsterTons} unit="tons" color={COLORS.success} subtext="DBE" />
-              <MetricCard title="Ethylbenzene" value={rollingYearData.ethylbenzeneTons} unit="tons" color={COLORS.pink} subtext="CAS 100-41-4" />
-            </div>
-
-            {/* Monthly Summary */}
-            <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>{MONTHS[selectedMonth]} {selectedYear} Summary</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '16px', marginBottom: '32px' }}>
-              <MetricCard title="Monthly Usage" value={monthlySummary.total.gallons} unit="gal" color={COLORS.blue} />
-              <MetricCard title="VOC Emissions" value={monthlySummary.total.vocTons} unit="tons" color={COLORS.accent} />
-              <MetricCard title="HAPs" value={monthlySummary.total.hapTons} unit="tons" color={COLORS.purple} />
-              <MetricCard title="Cumene" value={monthlySummary.total.cumeneTons} unit="tons" color={COLORS.cyan} />
-              <MetricCard title="Dibasic Ester" value={monthlySummary.total.dibasicEsterTons} unit="tons" color={COLORS.success} />
-              <MetricCard title="Ethylbenzene" value={monthlySummary.total.ethylbenzeneTons} unit="tons" color={COLORS.pink} />
-            </div>
-
-            {/* Charts */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px', marginBottom: '24px' }}>
-              <div style={{ background: 'white', borderRadius: '16px', padding: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-                <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>12-Month Emissions Trend</h3>
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={monthlyTrendData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} tickLine={false} />
-                    <YAxis yAxisId="left" tick={{ fontSize: 11 }} tickLine={false} />
-                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} tickLine={false} />
-                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }} />
-                    <Legend />
-                    <Line yAxisId="left" type="monotone" dataKey="gallons" name="Usage (gal)" stroke={COLORS.blue} strokeWidth={2} dot={false} />
-                    <Line yAxisId="right" type="monotone" dataKey="vocTons" name="VOC (tons)" stroke={COLORS.accent} strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <div style={{ background: 'white', borderRadius: '16px', padding: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-                <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>Usage by Category</h3>
-                <ResponsiveContainer width="100%" height={280}>
-                  <PieChart>
-                    <Pie data={categoryBreakdown} cx="50%" cy="50%" innerRadius={60} outerRadius={100} dataKey="gallons" nameKey="name" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {categoryBreakdown.map((entry, index) => (<Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />))}
-                    </Pie>
-                    <Tooltip formatter={(value) => `${value.toFixed(1)} gal`} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Emissions by Unit Table */}
-            <div style={{ background: 'white', borderRadius: '16px', padding: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>Emissions by Unit - {MONTHS[selectedMonth]} {selectedYear}</h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                <thead>
-                  <tr style={{ background: '#f8fafc' }}>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Emission Unit</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Usage (gal)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>VOC (lbs)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>HAPs (lbs)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Cumene (lbs)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Dibasic Ester (lbs)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Ethylbenzene (lbs)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {emissionUnits.map((eu, i) => (
-                    <tr key={eu} style={{ background: i % 2 === 0 ? 'white' : '#fafafa' }}>
-                      <td style={{ padding: '12px 16px', fontWeight: '500', color: COLORS.primary }}>{eu}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.byEU[eu]?.gallons || 0).toFixed(2)}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.byEU[eu]?.vocLbs || 0).toFixed(2)}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.byEU[eu]?.hapLbs || 0).toFixed(4)}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.byEU[eu]?.cumene || 0).toFixed(4)}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.byEU[eu]?.dibasicEster || 0).toFixed(4)}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.byEU[eu]?.ethylbenzene || 0).toFixed(4)}</td>
+            {/* VOC Emissions Table */}
+            <div style={{ background: 'white', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>VOC Emissions (Tons)</h3>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc' }}>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600' }}>Year</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600' }}>Month</th>
+                      <th colSpan={2} style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', background: '#fef3c7' }}>EU-CoatingLine-01</th>
+                      <th colSpan={2} style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', background: '#dbeafe' }}>EU-CoatingLine-02</th>
+                      <th colSpan={2} style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', background: '#dcfce7' }}>EU-CoatingLine-03</th>
+                      <th colSpan={2} style={{ padding: '10px', textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', background: '#f3e8ff' }}>FG-Coating</th>
                     </tr>
-                  ))}
-                  <tr style={{ background: '#f1f5f9', fontWeight: '600' }}>
-                    <td style={{ padding: '12px 16px' }}>FACILITY TOTAL</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>{monthlySummary.total.gallons.toFixed(2)}</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.total.vocTons * 2000).toFixed(2)}</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.total.hapTons * 2000).toFixed(4)}</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.total.cumeneTons * 2000).toFixed(4)}</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.total.dibasicEsterTons * 2000).toFixed(4)}</td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>{(monthlySummary.total.ethylbenzeneTons * 2000).toFixed(4)}</td>
-                  </tr>
-                </tbody>
-              </table>
+                    <tr style={{ background: '#f8fafc' }}>
+                      <th style={{ padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}></th>
+                      <th style={{ padding: '6px 10px', borderBottom: '1px solid #e2e8f0' }}></th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', fontSize: '10px' }}>Monthly</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', fontSize: '10px' }}>12-Mo Rolling</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', fontSize: '10px' }}>Monthly</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', fontSize: '10px' }}>12-Mo Rolling</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', fontSize: '10px' }}>Monthly</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', fontSize: '10px' }}>12-Mo Rolling</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', fontSize: '10px' }}>Monthly</th>
+                      <th style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #e2e8f0', fontSize: '10px' }}>12-Mo Rolling</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aggregateEmissions.slice(0, 24).map((row, i) => (
+                      <tr key={i} style={{ background: row.year === selectedYear && row.month === selectedMonth ? '#fffbeb' : i % 2 === 0 ? 'white' : '#fafafa' }}>
+                        <td style={{ padding: '8px 10px', fontWeight: '500' }}>{row.month === 0 ? row.year : ''}</td>
+                        <td style={{ padding: '8px 10px' }}>{row.monthName}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.byEU['EU-CoatingLine-01']?.vocMonthly.toFixed(4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '500' }}>{row.byEU['EU-CoatingLine-01']?.vocRolling.toFixed(4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.byEU['EU-CoatingLine-02']?.vocMonthly.toFixed(4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '500' }}>{row.byEU['EU-CoatingLine-02']?.vocRolling.toFixed(4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.byEU['EU-CoatingLine-03']?.vocMonthly.toFixed(4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '500' }}>{row.byEU['EU-CoatingLine-03']?.vocRolling.toFixed(4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.vocMonthlyTotal.toFixed(4)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '500' }}>{row.vocRollingTotal.toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* CAS Specific & HAPs Emissions */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
+              <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>CAS Specific Emissions</h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc' }}>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Chemical</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>CAS #</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Monthly</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>12-Mo Rolling</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Limit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ padding: '8px 10px' }}>Dibasic Ester</td>
+                      <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: '11px' }}>627930, 119400, 106650</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{currentEmissions.dibasicEsterMonthly.toFixed(2)} lbs</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '500' }}>{(currentEmissions.dibasicEsterRolling / 2000).toFixed(4)} tons</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>2.9 TPY</td>
+                    </tr>
+                    <tr style={{ background: '#fafafa' }}>
+                      <td style={{ padding: '8px 10px' }}>Ethylbenzene</td>
+                      <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: '11px' }}>100-41-4</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{currentEmissions.ethylbenzeneMonthly.toFixed(2)} lbs</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '500' }}>{(currentEmissions.ethylbenzeneRolling / 2000).toFixed(4)} tons</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>2.9 TPY</td>
+                    </tr>
+                    <tr>
+                      <td style={{ padding: '8px 10px' }}>Cumene</td>
+                      <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontSize: '11px' }}>98-82-8</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{currentEmissions.cumeneMonthly.toFixed(6)} tons</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '500' }}>{currentEmissions.cumeneRolling.toFixed(6)} tons</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>1.4 TPY</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>HAPs Emissions (Tons)</h3>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
+                    <tr style={{ background: '#f8fafc' }}>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Category</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Monthly</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>12-Mo Rolling</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Limit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style={{ padding: '8px 10px', fontWeight: '500' }}>Aggregate HAPs (FG-Facility)</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{currentEmissions.hapMonthly.toFixed(6)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '500' }}>{currentEmissions.hapRolling.toFixed(6)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>8.9 TPY</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style={{ marginTop: '20px' }}>
+                  <h4 style={{ fontSize: '12px', fontWeight: '600', color: COLORS.gray, marginBottom: '12px' }}>12-Month Trend</h4>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <LineChart data={trendData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="month" tick={{ fontSize: 9 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="vocRolling" name="VOC (12-mo)" stroke={COLORS.accent} strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="hapRolling" name="HAPs (12-mo)" stroke={COLORS.purple} strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
-        {/* USAGE TAB */}
-        {activeTab === 'usage' && (
+        {/* Tab 2: Aggregate Material Use */}
+        {activeTab === 'aggregate-material' && (
           <div>
-            <h2 style={{ fontSize: '20px', fontWeight: '700', color: COLORS.primary, margin: '0 0 24px' }}>Log Material Usage</h2>
-            
-            {/* Add Usage Form */}
-            <div style={{ background: 'white', borderRadius: '16px', padding: '24px', marginBottom: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>Add New Usage Entry</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px', alignItems: 'end' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Date</label>
-                  <input type="date" value={newUsage.date} onChange={e => setNewUsage({ ...newUsage, date: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Product</label>
-                  <select value={newUsage.productId} onChange={e => setNewUsage({ ...newUsage, productId: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
-                    <option value="">Select product...</option>
-                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Emission Unit</label>
-                  <select value={newUsage.emissionUnit} onChange={e => setNewUsage({ ...newUsage, emissionUnit: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
-                    {emissionUnits.map(eu => <option key={eu} value={eu}>{eu}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Gallons</label>
-                  <input type="number" step="0.01" value={newUsage.gallons} onChange={e => setNewUsage({ ...newUsage, gallons: e.target.value })} placeholder="0.00" style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                </div>
-                <button onClick={handleAddUsage} disabled={isLoading} style={{ padding: '10px 24px', background: COLORS.accent, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer', opacity: isLoading ? 0.6 : 1 }}>
-                  {isLoading ? 'Saving...' : 'Add Entry'}
-                </button>
-              </div>
-            </div>
-
-            {/* Daily Usage Chart */}
-            <div style={{ background: 'white', borderRadius: '16px', padding: '24px', marginBottom: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>Daily Usage - {MONTHS[selectedMonth]} {selectedYear}</h3>
-              <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={dailyUsage}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="date" tick={{ fontSize: 10 }} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11 }} tickLine={false} />
-                  <Tooltip />
-                  <Legend />
-                  <Bar dataKey="Basecoat.automotive" name="Basecoat (Auto)" stackId="basecoat" fill={COLORS.accent} />
-                  <Bar dataKey="Basecoat.nonAutomotive" name="Basecoat (Non-Auto)" stackId="basecoat" fill={`${COLORS.accent}80`} />
-                  <Bar dataKey="Hardener.automotive" name="Hardener (Auto)" stackId="hardener" fill={COLORS.blue} />
-                  <Bar dataKey="Hardener.nonAutomotive" name="Hardener (Non-Auto)" stackId="hardener" fill={`${COLORS.blue}80`} />
-                  <Bar dataKey="Clearcoat.automotive" name="Clearcoat (Auto)" stackId="clearcoat" fill={COLORS.success} />
-                  <Bar dataKey="Clearcoat.nonAutomotive" name="Clearcoat (Non-Auto)" stackId="clearcoat" fill={`${COLORS.success}80`} />
-                  <Bar dataKey="Solvent.automotive" name="Solvent (Auto)" stackId="solvent" fill={COLORS.purple} />
-                  <Bar dataKey="Solvent.nonAutomotive" name="Solvent (Non-Auto)" stackId="solvent" fill={`${COLORS.purple}80`} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Recent Usage Table */}
-            <div style={{ background: 'white', borderRadius: '16px', padding: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>Recent Usage Entries</h3>
-              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                  <thead style={{ position: 'sticky', top: 0, background: 'white' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: '700', color: COLORS.primary, margin: '0 0 20px' }}>2. Aggregate Material Use Report</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>VOC Containing Material Use (Gallons)</h3>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+                  <thead>
                     <tr style={{ background: '#f8fafc' }}>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Date</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Product</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Category</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Type</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>EU</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Gallons</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>VOC (lbs)</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>HAPs (lbs)</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Year</th>
+                      <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Month</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0', background: '#fef3c7' }}>EU-CoatingLine-01</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0', background: '#dbeafe' }}>EU-CoatingLine-02</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0', background: '#dcfce7' }}>EU-CoatingLine-03</th>
+                      <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0', background: '#f3e8ff' }}>FG-Facility Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {usageLog.slice(-50).reverse().map((u, i) => (
-                      <tr key={u.id} style={{ background: i % 2 === 0 ? 'white' : '#fafafa' }}>
-                        <td style={{ padding: '10px 16px' }}>{u.date}</td>
-                        <td style={{ padding: '10px 16px', fontWeight: '500' }}>{u.productName}</td>
-                        <td style={{ padding: '10px 16px' }}>
-                          <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600', background: `${getCategoryColor(u.category)}20`, color: getCategoryColor(u.category) }}>{u.category}</span>
-                        </td>
-                        <td style={{ padding: '10px 16px', fontSize: '12px', color: '#64748b' }}>{u.type}</td>
-                        <td style={{ padding: '10px 16px', fontSize: '12px' }}>{u.emissionUnit.replace('EU-Coating Line-', 'Line ')}</td>
-                        <td style={{ padding: '10px 16px', textAlign: 'right', fontWeight: '500' }}>{u.gallons.toFixed(2)}</td>
-                        <td style={{ padding: '10px 16px', textAlign: 'right' }}>{u.vocLbs.toFixed(2)}</td>
-                        <td style={{ padding: '10px 16px', textAlign: 'right' }}>{u.hapLbs.toFixed(4)}</td>
+                    {aggregateMaterialUse.slice(0, 24).map((row, i) => (
+                      <tr key={i} style={{ background: row.year === selectedYear && row.month === selectedMonth ? '#fffbeb' : i % 2 === 0 ? 'white' : '#fafafa' }}>
+                        <td style={{ padding: '8px 10px', fontWeight: '500' }}>{row.month === 0 ? row.year : ''}</td>
+                        <td style={{ padding: '8px 10px' }}>{row.monthName}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.byEU['EU-CoatingLine-01']?.toFixed(2)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.byEU['EU-CoatingLine-02']?.toFixed(2)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.byEU['EU-CoatingLine-03']?.toFixed(2)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: '500' }}>{row.total.toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -563,246 +503,153 @@ export default function VOCTracker() {
           </div>
         )}
 
-        {/* PRODUCTS TAB */}
-        {activeTab === 'products' && (
+        {/* Tab 3-6: Daily Use by EU */}
+        {activeTab === 'daily-use' && (
           <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-              <h2 style={{ fontSize: '20px', fontWeight: '700', color: COLORS.primary, margin: 0 }}>Product Database</h2>
-              <button onClick={() => setShowProductModal(true)} style={{ padding: '10px 20px', background: COLORS.accent, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>+ Add Product</button>
-            </div>
-
-            {/* Product Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '16px' }}>
-              {products.map(p => (
-                <div key={p.id} onClick={() => setSelectedProduct(p)} style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)', cursor: 'pointer', border: '2px solid transparent', transition: 'all 0.2s' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                    <div>
-                      <h3 style={{ fontSize: '15px', fontWeight: '600', color: COLORS.primary, margin: '0 0 4px' }}>{p.name}</h3>
-                      <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>{p.number} • {p.supplier}</p>
-                    </div>
-                    <span style={{ padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: '600', background: `${getCategoryColor(p.category)}20`, color: getCategoryColor(p.category) }}>{p.category}</span>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginTop: '16px' }}>
-                    <div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '500' }}>VOC</div>
-                      <div style={{ fontSize: '15px', fontWeight: '600', color: COLORS.primary }}>{p.vocLbsGal} <span style={{ fontSize: '11px', fontWeight: '400', color: '#64748b' }}>lb/gal</span></div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '500' }}>HAPs</div>
-                      <div style={{ fontSize: '15px', fontWeight: '600', color: COLORS.primary }}>{(p.hapV * p.sg * 8.34).toFixed(3)} <span style={{ fontSize: '11px', fontWeight: '400', color: '#64748b' }}>lb/gal</span></div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: '#94a3b8', fontWeight: '500' }}>SG</div>
-                      <div style={{ fontSize: '15px', fontWeight: '600', color: COLORS.primary }}>{p.sg}</div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #f1f5f9' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '600', background: p.type === 'automotive' ? '#dbeafe' : '#fef3c7', color: p.type === 'automotive' ? '#1e40af' : '#92400e' }}>
-                      {p.type === 'automotive' ? 'AUTOMOTIVE' : 'NON-AUTOMOTIVE SPECIALTY'}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Product Detail Modal */}
-            {selectedProduct && (
-              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setSelectedProduct(null)}>
-                <div style={{ background: 'white', borderRadius: '16px', padding: '32px', maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
-                    <div>
-                      <h2 style={{ fontSize: '20px', fontWeight: '700', color: COLORS.primary, margin: '0 0 4px' }}>{selectedProduct.name}</h2>
-                      <p style={{ fontSize: '14px', color: '#64748b', margin: 0 }}>{selectedProduct.number} • {selectedProduct.supplier}</p>
-                    </div>
-                    <button onClick={() => setSelectedProduct(null)} style={{ background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#94a3b8' }}>×</button>
-                  </div>
-                  <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#475569', marginBottom: '12px' }}>Environmental Data</h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
-                    <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>VOC Content</div>
-                      <div style={{ fontSize: '18px', fontWeight: '600', color: COLORS.primary }}>{selectedProduct.vocLbsGal} lb/gal</div>
-                    </div>
-                    <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Aggregate HAPs</div>
-                      <div style={{ fontSize: '18px', fontWeight: '600', color: COLORS.primary }}>{(selectedProduct.hapV * selectedProduct.sg * 8.34).toFixed(4)} lb/gal</div>
-                    </div>
-                    <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Cumene (CAS 98-82-8)</div>
-                      <div style={{ fontSize: '18px', fontWeight: '600', color: COLORS.primary }}>{(selectedProduct.cumene * selectedProduct.sg * 8.34).toFixed(4)} lb/gal</div>
-                    </div>
-                    <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '11px', color: '#64748b' }}>Ethylbenzene (CAS 100-41-4)</div>
-                      <div style={{ fontSize: '18px', fontWeight: '600', color: COLORS.primary }}>{(selectedProduct.ethylbenzene * selectedProduct.sg * 8.34).toFixed(4)} lb/gal</div>
-                    </div>
-                  </div>
-                  {selectedProduct.chemicals && selectedProduct.chemicals.length > 0 && (
-                    <>
-                      <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#475569', marginBottom: '12px' }}>Chemical Composition</h4>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                        <thead>
-                          <tr style={{ background: '#f8fafc' }}>
-                            <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: '600', color: '#475569' }}>Chemical</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: '600', color: '#475569' }}>CAS</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: '600', color: '#475569' }}>Weight %</th>
-                            <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: '600', color: '#475569' }}>HAP</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedProduct.chemicals.map((c, i) => (
-                            <tr key={i} style={{ borderBottom: '1px solid #f1f5f9' }}>
-                              <td style={{ padding: '10px 12px' }}>{c.name}</td>
-                              <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: '12px' }}>{c.cas}</td>
-                              <td style={{ padding: '10px 12px', textAlign: 'right' }}>{(c.pct * 100).toFixed(2)}%</td>
-                              <td style={{ padding: '10px 12px', textAlign: 'center' }}>{c.isHap && <span style={{ color: COLORS.danger, fontWeight: '600' }}>●</span>}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </>
-                  )}
+            <h2 style={{ fontSize: '18px', fontWeight: '700', color: COLORS.primary, margin: '0 0 20px' }}>4-6. Daily Use by Emission Unit - {MONTHS[selectedMonth]} {selectedYear}</h2>
+            {EMISSION_UNITS.map(eu => (
+              <div key={eu} style={{ background: 'white', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+                <h3 style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>{eu}</h3>
+                <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                    <thead style={{ position: 'sticky', top: 0, background: 'white' }}>
+                      <tr style={{ background: '#f8fafc' }}>
+                        <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Date</th>
+                        <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Coating Type</th>
+                        <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Product Number</th>
+                        <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Part Type</th>
+                        <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Material Use (Gals)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dailyUseByEU[eu]?.map((row, i) => (
+                        <tr key={i} style={{ background: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                          <td style={{ padding: '6px 8px' }}>{row.date}</td>
+                          <td style={{ padding: '6px 8px' }}>{row.coatingType}</td>
+                          <td style={{ padding: '6px 8px', fontFamily: 'monospace' }}>{row.prodNumber}</td>
+                          <td style={{ padding: '6px 8px' }}><span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', background: row.partType === 'Automotive' ? '#dbeafe' : '#fef3c7', color: row.partType === 'Automotive' ? '#1e40af' : '#92400e' }}>{row.partType}</span></td>
+                          <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: '500' }}>{row.materialUse.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                      {(!dailyUseByEU[eu] || dailyUseByEU[eu].length === 0) && (
+                        <tr><td colSpan={5} style={{ padding: '20px', textAlign: 'center', color: COLORS.gray }}>No usage data for this period</td></tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
               </div>
-            )}
-
-            {/* Add Product Modal */}
-            {showProductModal && (
-              <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowProductModal(false)}>
-                <div style={{ background: 'white', borderRadius: '16px', padding: '32px', maxWidth: '600px', width: '90%', maxHeight: '80vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-                  <h2 style={{ fontSize: '20px', fontWeight: '700', color: COLORS.primary, marginBottom: '24px' }}>Add New Product</h2>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Product ID *</label>
-                      <input type="text" value={newProduct.id} onChange={e => setNewProduct({ ...newProduct, id: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Product Name *</label>
-                      <input type="text" value={newProduct.name} onChange={e => setNewProduct({ ...newProduct, name: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Supplier</label>
-                      <input type="text" value={newProduct.supplier} onChange={e => setNewProduct({ ...newProduct, supplier: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Category</label>
-                      <select value={newProduct.category} onChange={e => setNewProduct({ ...newProduct, category: e.target.value })} style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }}>
-                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Specific Gravity</label>
-                      <input type="number" step="0.001" value={newProduct.sg} onChange={e => setNewProduct({ ...newProduct, sg: e.target.value })} placeholder="1.000" style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>VOC (lb/gal)</label>
-                      <input type="number" step="0.01" value={newProduct.vocLbsGal} onChange={e => setNewProduct({ ...newProduct, vocLbsGal: e.target.value })} placeholder="0.00" style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Aggregate HAPs (%)</label>
-                      <input type="number" step="0.001" value={newProduct.hapV} onChange={e => setNewProduct({ ...newProduct, hapV: e.target.value })} placeholder="0.000" style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Ethylbenzene (%)</label>
-                      <input type="number" step="0.001" value={newProduct.ethylbenzene} onChange={e => setNewProduct({ ...newProduct, ethylbenzene: e.target.value })} placeholder="0.000" style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Cumene (%)</label>
-                      <input type="number" step="0.001" value={newProduct.cumene} onChange={e => setNewProduct({ ...newProduct, cumene: e.target.value })} placeholder="0.000" style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#64748b', marginBottom: '6px' }}>Dibasic Ester (%)</label>
-                      <input type="number" step="0.001" value={newProduct.dibasicEster} onChange={e => setNewProduct({ ...newProduct, dibasicEster: e.target.value })} placeholder="0.000" style={{ width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '14px' }} />
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '12px', marginTop: '24px', justifyContent: 'flex-end' }}>
-                    <button onClick={() => setShowProductModal(false)} style={{ padding: '10px 20px', background: '#f1f5f9', color: '#475569', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' }}>Cancel</button>
-                    <button onClick={handleAddProduct} disabled={isLoading} style={{ padding: '10px 20px', background: COLORS.accent, color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer', opacity: isLoading ? 0.6 : 1 }}>
-                      {isLoading ? 'Saving...' : 'Add Product'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
+            ))}
           </div>
         )}
 
-        {/* REPORTS TAB */}
-        {activeTab === 'reports' && (
+        {/* Tab 7: Material Content Report */}
+        {activeTab === 'material-content' && (
           <div>
-            <h2 style={{ fontSize: '20px', fontWeight: '700', color: COLORS.primary, margin: '0 0 24px' }}>Environmental Reports</h2>
-            
-            {/* Material Content Report */}
-            <div style={{ background: 'white', borderRadius: '16px', padding: '24px', marginBottom: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-              <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>Material Content Report (lbs/gal)</h3>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+            <h2 style={{ fontSize: '18px', fontWeight: '700', color: COLORS.primary, margin: '0 0 20px' }}>7. Material Content Report (FG-Coating)</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
                 <thead>
                   <tr style={{ background: '#f8fafc' }}>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Product</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'left', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Category</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>VOC (lb/gal)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Agg. HAPs (lb/gal)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Cumene (lb/gal)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Dibasic Ester (lb/gal)</th>
-                    <th style={{ padding: '12px 16px', textAlign: 'right', fontWeight: '600', color: '#475569', borderBottom: '2px solid #e2e8f0' }}>Ethylbenzene (lb/gal)</th>
+                    <th style={{ padding: '10px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Product Number</th>
+                    <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>HAP Content<br/><span style={{ fontSize: '10px', fontWeight: 'normal' }}>Lbs/gal</span></th>
+                    <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>VOC Content<br/><span style={{ fontSize: '10px', fontWeight: 'normal' }}>Lbs/gal</span></th>
+                    <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Cumene<br/><span style={{ fontSize: '10px', fontWeight: 'normal' }}>98828 Lbs/gal</span></th>
+                    <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Dimethyl Adipate<br/><span style={{ fontSize: '10px', fontWeight: 'normal' }}>627930 Lbs/gal</span></th>
+                    <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Dimethyl Glutarate<br/><span style={{ fontSize: '10px', fontWeight: 'normal' }}>119400 Lbs/gal</span></th>
+                    <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Dimethyl Succinate<br/><span style={{ fontSize: '10px', fontWeight: 'normal' }}>106650 Lbs/gal</span></th>
+                    <th style={{ padding: '10px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Ethylbenzene<br/><span style={{ fontSize: '10px', fontWeight: 'normal' }}>100414 Lbs/gal</span></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {materialContent.map((p, i) => (
-                    <tr key={p.id} style={{ background: i % 2 === 0 ? 'white' : '#fafafa' }}>
-                      <td style={{ padding: '12px 16px', fontWeight: '500' }}>{p.name}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <span style={{ padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600', background: `${getCategoryColor(p.category)}20`, color: getCategoryColor(p.category) }}>{p.category}</span>
-                      </td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{p.vocLbsGal.toFixed(2)}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{p.hapLbsGal.toFixed(4)}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{p.cumene.toFixed(4)}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{p.dibasicEster.toFixed(4)}</td>
-                      <td style={{ padding: '12px 16px', textAlign: 'right' }}>{p.ethylbenzene.toFixed(4)}</td>
+                  {materialContent.map((row, i) => (
+                    <tr key={i} style={{ background: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                      <td style={{ padding: '8px 10px', fontFamily: 'monospace', fontWeight: '500' }}>{row.productNumber}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.hapContent.toFixed(4)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.vocContent.toFixed(2)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.cumeneContent.toFixed(6)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.dimethylAdipate.toFixed(6)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.dimethylGlutarate.toFixed(6)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.dimethylSuccinate.toFixed(6)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.ethylbenzeneContent.toFixed(6)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
 
-            {/* Month-End Summary */}
-            <div style={{ background: 'white', borderRadius: '16px', padding: '24px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.primary, margin: 0 }}>Month-End Emissions Summary</h3>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <select value={selectedMonth} onChange={e => setSelectedMonth(parseInt(e.target.value))} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
-                    {MONTHS.map((m, i) => <option key={i} value={i}>{m}</option>)}
-                  </select>
-                  <select value={selectedYear} onChange={e => setSelectedYear(parseInt(e.target.value))} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
-                    {[2023, 2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
+        {/* Log Usage Tab */}
+        {activeTab === 'log-usage' && (
+          <div>
+            <h2 style={{ fontSize: '18px', fontWeight: '700', color: COLORS.primary, margin: '0 0 20px' }}>Log Material Usage</h2>
+            <div style={{ background: 'white', borderRadius: '12px', padding: '20px', marginBottom: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>Add Usage Entry</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '16px', alignItems: 'end' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: COLORS.gray, marginBottom: '4px' }}>Date</label>
+                  <input type="date" value={newUsage.date} onChange={e => setNewUsage({ ...newUsage, date: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: COLORS.gray, marginBottom: '4px' }}>Product</label>
+                  <select value={newUsage.productId} onChange={e => setNewUsage({ ...newUsage, productId: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
+                    <option value="">Select...</option>
+                    {products.map(p => <option key={p.id} value={p.id}>{p.number} - {p.name}</option>)}
                   </select>
                 </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: COLORS.gray, marginBottom: '4px' }}>Emission Unit</label>
+                  <select value={newUsage.emissionUnit} onChange={e => setNewUsage({ ...newUsage, emissionUnit: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
+                    {EMISSION_UNITS.map(eu => <option key={eu} value={eu}>{eu}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: COLORS.gray, marginBottom: '4px' }}>Part Type</label>
+                  <select value={newUsage.partType} onChange={e => setNewUsage({ ...newUsage, partType: e.target.value })} style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
+                    <option value="Automotive">Automotive</option>
+                    <option value="Non-Automotive Specialty">Non-Automotive Specialty</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: COLORS.gray, marginBottom: '4px' }}>Gallons</label>
+                  <input type="number" step="0.01" value={newUsage.gallons} onChange={e => setNewUsage({ ...newUsage, gallons: e.target.value })} placeholder="0.00" style={{ width: '100%', padding: '8px 10px', borderRadius: '6px', border: '1px solid #e2e8f0', fontSize: '13px' }} />
+                </div>
+                <button onClick={handleAddUsage} style={{ padding: '8px 20px', background: COLORS.accent, color: 'white', border: 'none', borderRadius: '6px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' }}>Add Entry</button>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                <div>
-                  <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#475569', marginBottom: '12px' }}>Monthly Totals</h4>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <tbody>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>Material Usage</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{monthlySummary.total.gallons.toFixed(2)} gal</td></tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>VOC Emissions</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{monthlySummary.total.vocTons.toFixed(4)} tons</td></tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>Aggregate HAPs</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{monthlySummary.total.hapTons.toFixed(4)} tons</td></tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>Cumene</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{monthlySummary.total.cumeneTons.toFixed(6)} tons</td></tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>Dibasic Ester</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{monthlySummary.total.dibasicEsterTons.toFixed(6)} tons</td></tr>
-                      <tr><td style={{ padding: '10px 0', fontWeight: '500' }}>Ethylbenzene</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{monthlySummary.total.ethylbenzeneTons.toFixed(6)} tons</td></tr>
-                    </tbody>
-                  </table>
-                </div>
-                <div>
-                  <h4 style={{ fontSize: '14px', fontWeight: '600', color: '#475569', marginBottom: '12px' }}>Rolling 12-Month Totals</h4>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <tbody>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>Material Usage</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{rollingYearData.gallons.toFixed(2)} gal</td></tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>VOC Emissions</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{rollingYearData.vocTons.toFixed(4)} tons</td></tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>Aggregate HAPs</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{rollingYearData.hapTons.toFixed(4)} tons</td></tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>Cumene</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{rollingYearData.cumeneTons.toFixed(6)} tons</td></tr>
-                      <tr style={{ borderBottom: '1px solid #f1f5f9' }}><td style={{ padding: '10px 0', fontWeight: '500' }}>Dibasic Ester</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{rollingYearData.dibasicEsterTons.toFixed(6)} tons</td></tr>
-                      <tr><td style={{ padding: '10px 0', fontWeight: '500' }}>Ethylbenzene</td><td style={{ padding: '10px 0', textAlign: 'right' }}>{rollingYearData.ethylbenzeneTons.toFixed(6)} tons</td></tr>
-                    </tbody>
-                  </table>
-                </div>
+            </div>
+
+            {/* Recent Entries */}
+            <div style={{ background: 'white', borderRadius: '12px', padding: '20px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+              <h3 style={{ fontSize: '14px', fontWeight: '600', color: COLORS.primary, marginBottom: '16px' }}>Recent Usage Entries</h3>
+              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: 'white' }}>
+                    <tr style={{ background: '#f8fafc' }}>
+                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Date</th>
+                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Product</th>
+                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Type</th>
+                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>EU</th>
+                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Part Type</th>
+                      <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>Gallons</th>
+                      <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>VOC (lbs)</th>
+                      <th style={{ padding: '8px', textAlign: 'right', borderBottom: '2px solid #e2e8f0' }}>HAPs (lbs)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usageLog.slice(-50).reverse().map((u, i) => (
+                      <tr key={u.id} style={{ background: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                        <td style={{ padding: '6px 8px' }}>{u.date}</td>
+                        <td style={{ padding: '6px 8px', fontWeight: '500' }}>{u.productNumber}</td>
+                        <td style={{ padding: '6px 8px' }}><span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', background: '#e2e8f0' }}>{PRODUCT_TYPES[u.productType]}</span></td>
+                        <td style={{ padding: '6px 8px', fontSize: '10px' }}>{u.emissionUnit.replace('EU-CoatingLine-', 'EU-')}</td>
+                        <td style={{ padding: '6px 8px' }}><span style={{ padding: '2px 6px', borderRadius: '4px', fontSize: '10px', background: u.partType === 'Automotive' ? '#dbeafe' : '#fef3c7' }}>{u.partType === 'Automotive' ? 'Auto' : 'Non-Auto'}</span></td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: '500' }}>{u.gallons.toFixed(2)}</td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right' }}>{u.vocLbs.toFixed(2)}</td>
+                        <td style={{ padding: '6px 8px', textAlign: 'right' }}>{u.hapLbs.toFixed(4)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -810,10 +657,10 @@ export default function VOCTracker() {
       </main>
 
       {/* Footer */}
-      <footer style={{ background: '#f8fafc', borderTop: '1px solid #e2e8f0', padding: '16px 32px', marginTop: '40px' }}>
-        <div style={{ maxWidth: '1400px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>VOC Emissions Tracker • Environmental Compliance Management System</p>
-          <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>Tracks: VOC, HAPs, Cumene (CAS 98-82-8), Dibasic Ester, Ethylbenzene (CAS 100-41-4)</p>
+      <footer style={{ background: '#1e3a5f', color: 'white', padding: '16px 24px', marginTop: '40px' }}>
+        <div style={{ maxWidth: '1600px', margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#94a3b8' }}>
+          <span>PTI 183-15 Aggregate Emissions Tracker • EGLE Environmental Compliance</span>
+          <span>Tracks: VOC, HAPs, Dibasic Ester (CAS 627930, 119400, 106650), Ethylbenzene (CAS 100-41-4), Cumene (CAS 98-82-8)</span>
         </div>
       </footer>
     </div>
